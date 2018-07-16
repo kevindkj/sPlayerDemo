@@ -1,0 +1,14 @@
+prefix=/home/dkj/work/linux/sdPlayer/FFmpegV4.0
+exec_prefix=${prefix}
+libdir=/home/dkj/work/linux/sdPlayer/FFmpegV4.0/lib
+includedir=/home/dkj/work/linux/sdPlayer/FFmpegV4.0/include
+
+Name: libavcodec
+Description: FFmpeg codec library
+Version: 58.20.104
+Requires: libswresample >= 3.2.100, libavutil >= 56.18.102
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavcodec -pthread -lm -lz
+Libs.private: 
+Cflags: -I${includedir}

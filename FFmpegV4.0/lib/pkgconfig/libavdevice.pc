@@ -1,0 +1,14 @@
+prefix=/home/dkj/work/linux/sdPlayer/FFmpegV4.0
+exec_prefix=${prefix}
+libdir=/home/dkj/work/linux/sdPlayer/FFmpegV4.0/lib
+includedir=/home/dkj/work/linux/sdPlayer/FFmpegV4.0/include
+
+Name: libavdevice
+Description: FFmpeg device handling library
+Version: 58.4.101
+Requires: libavfilter >= 7.25.100, libswscale >= 5.2.100, libavformat >= 58.17.101, libavcodec >= 58.20.104, libswresample >= 3.2.100, libavutil >= 56.18.102
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavdevice -lm -lxcb -lxcb-shape -lxcb -lxcb-xfixes -lxcb-render -lxcb-shape -lxcb -lasound -lSDL2 -lXv -lX11 -lXext
+Libs.private: 
+Cflags: -I${includedir}

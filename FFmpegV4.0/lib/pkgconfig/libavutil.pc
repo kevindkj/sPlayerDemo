@@ -1,0 +1,14 @@
+prefix=/home/dkj/work/linux/sdPlayer/FFmpegV4.0
+exec_prefix=${prefix}
+libdir=/home/dkj/work/linux/sdPlayer/FFmpegV4.0/lib
+includedir=/home/dkj/work/linux/sdPlayer/FFmpegV4.0/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 56.18.102
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -pthread -lm
+Libs.private: 
+Cflags: -I${includedir}

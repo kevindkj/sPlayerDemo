@@ -1,0 +1,14 @@
+prefix=/home/dkj/work/linux/sdPlayer/FFmpegV4.0
+exec_prefix=${prefix}
+libdir=/home/dkj/work/linux/sdPlayer/FFmpegV4.0/lib
+includedir=/home/dkj/work/linux/sdPlayer/FFmpegV4.0/include
+
+Name: libswresample
+Description: FFmpeg audio resampling library
+Version: 3.2.100
+Requires: libavutil >= 56.18.102
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lswresample -lm
+Libs.private: 
+Cflags: -I${includedir}
