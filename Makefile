@@ -27,12 +27,12 @@ LIB_INC = -I$(FFMPEG_DIR)/include
 C_INC = -I.
 INCLUDES = $(C_INC) $(LIB_INC)
 LIBS = -L$(FFMPEG_DIR)/lib \
-	   -lavformat -lavcodec -lavutil -lswresample -lm -lpthread -lz 
+	   -lavformat -lavcodec -lavutil -lswresample -lm -lpthread -lz -lSDL2
 
 OUTPUT = $(APP_TOPDIR)/bin
-OBJS = ivDisDemo.o test.o
+OBJS = main.o
 SUB_DIRS = 
-TARGET = videoDisD
+TARGET = sPlayerDemo
 
 export OUTPUT
 
@@ -59,10 +59,8 @@ $(TARGET) : $(OBJS)
 	echo " path = $(INCLUDES)"
 	@$(CC) -c $(CFLAGS) $(INCLUDES) $< -o $(OUTPUT)/$@
 
-clean :
-mrproper :
+clean mrproper :
 	rm -rf $(OUTPUT)/*.o $(OUTPUT)/$(TARGET)
 
-distclean :
-clobber:
+distclean clobber:
 	rm -rf $(OUTPUT)
