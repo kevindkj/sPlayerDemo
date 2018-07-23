@@ -20,72 +20,110 @@
 #include<libavcodec/avcodec.h>
 #include<libavformat/avformat.h>
 #include<SDL2/SDL.h>
+//#include<SDL2/SDL_mutex.h>
+#include<pthread.h>
 
-const int bpp=12;
-int screen_w=800,screen_h=480;
-const int pixel_w=640,pixel_h=360;
-unsigned char buffer[345600];
-
-//Refresh Event
 #define REFRESH_EVENT  (SDL_USEREVENT + 1)
 #define BREAK_EVENT  (SDL_USEREVENT + 2)
 
-int thread_exit=0;
-
-int refresh_video(void *opaque){
-	thread_exit=0;
-	while (!thread_exit) {
-		SDL_Event event;
-		event.type = REFRESH_EVENT;
-		SDL_PushEvent(&event);
-		SDL_Delay(40);
-	}
-	thread_exit=0;
-	//Break
-	SDL_Event event;
-	event.type = BREAK_EVENT;
-	SDL_PushEvent(&event);
-
-	return 0;
-}
-int sPlayerGuiInit()
-{
-
-	return 0;
-}
-int sPlayerRefreshTread()
-{
-
-}
-int sPlayerGuiExit()
-{
-
-}
-int main(int argc, char *argv[])
-{
+typedef struct sPlayerHandle{
 	SDL_Window *window;
 	SDL_Renderer *renderer;
 	SDL_Texture *texture;
 	Uint32 pixformat;
-	FILE *fp = NULL;
-	SDL_Rect rect;
-	SDL_Thread *refreshThread = NULL;
-	SDL_Event event;
-	char *pfilePath = NULL;
+	int winWidth;
+	int winHeight;
+	int pixelWidth;
+	int pixelHeight;
+	unsigned char *frameBuf;
+	int bufSize;
+	int bufDataRdyFlag;
+	char *yuvFilePath;
+}sPlayerHandle_t;
 
-	//parameters check and using explanation
-	if( argc <= 1){
-		printf("sPlayerDemo using error : too few parameters!!!\n");
-		printf("-----------------------------------------------\n");
-		printf("synopsis : \n");
-		printf("	sPlayerDemo FILE\n");
-		//printf("descriptions : \n ");
+int g_ThreadExitFlag = 0;
+sPlayerHandle_t g_spHandle;
+SDL_mutex *g_pSdlMutex = NULL;
+SDL_cond *g_pSdlCond = NULL;
+
+int sPlayerGUI_threadfn(void *args)
+{
+	sPlayerHandle_t *pHandle = &g_spHandle;
+	SDL_Event event;
+	SDL_Rect rect;
+	
+	//SDL init
+	if( SDL_Init(SDL_INIT_VIDEO) ){
+		printf("couldn't init SDL - %s.\n", SDL_GetError());
 		return -1;
-	}else{
-		pfilePath = argv[1]; // copy file path
+	}
+	//create window	
+	pHandle->window = SDL_CreateWindow("simple player demo", \
+							SDL_WINDOWPOS_UNDEFINED, \
+							SDL_WINDOWPOS_UNDEFINED, \
+							pHandle->winWidth, \
+							pHandle->winHeight, \
+							SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE);
+	if( !pHandle->window ){
+		printf("could not create sdl window - %s.\n", SDL_GetError());
+		return -1;
 	}
 
-	printf("sPlayerDemo begin run.\n");
+	//create render
+	pHandle->renderer = SDL_CreateRenderer(pHandle->window, -1, 0);
+
+	//create texture
+	pHandle->texture = SDL_CreateTexture(pHandle->renderer, \
+										 pHandle->pixformat,SDL_TEXTUREACCESS_STREAMING, \
+										 pHandle->pixelWidth, \
+										 pHandle->pixelHeight);
+
+
+	while(1){
+		// wait refresh event
+		SDL_WaitEvent(&event);
+		if(event.type == REFRESH_EVENT){
+
+			SDL_LockMutex(g_pSdlMutex);
+			while(0 == pHandle->bufDataRdyFlag){
+		printf("%s,%d \n",__func__, __LINE__);	
+				SDL_CondWait(g_pSdlCond,g_pSdlMutex);
+			}
+			pHandle->bufDataRdyFlag = 0;	
+		//printf("%s,%d \n",__func__, __LINE__);	
+			SDL_UpdateTexture(pHandle->texture, NULL, pHandle->frameBuf, pHandle->pixelWidth);  
+			SDL_UnlockMutex(g_pSdlMutex);
+
+			//FIX: If window is resize
+			rect.x = 0;  
+			rect.y = 0;  
+			rect.w = pHandle->winWidth;  
+			rect.h = pHandle->winHeight;  
+			
+			SDL_RenderClear(pHandle->renderer);   
+			SDL_RenderCopy(pHandle->renderer, pHandle->texture, NULL, &rect);  
+			SDL_RenderPresent(pHandle->renderer);
+
+		}else if(event.type == SDL_WINDOWEVENT){
+			SDL_GetWindowSize(pHandle->window,&(pHandle->winWidth),&(pHandle->winHeight));
+		}else if(event.type == SDL_QUIT){
+			g_ThreadExitFlag = 1;
+			printf("sPlayerGUI_threadfn: sdl quit event occured!\n");
+		}else if(event.type == BREAK_EVENT){
+			printf("sPlayerGUI_threadfn: sdl break event occured!\n");
+			break;
+		}
+	}
+
+	//quit SDL
+	SDL_Quit();
+	return 0;
+}
+int sPlayerDecode_threadfn(void *args)
+{
+	FILE *fp = NULL;
+	SDL_Event eventPost;
+	sPlayerHandle_t *pHandle = &g_spHandle;
 
 	// regitser av api
 	// open input av file with avformat lib
@@ -94,80 +132,97 @@ int main(int argc, char *argv[])
 	// open codec
 	// cyclic reading frame
 		// if(get packet - yes)
-			// AVPacket ?
+			// AVPacket type ?
 				// Video packet
+			
 				// Audio packet
 		// else if(get packet - no) quit
+
 	
-
-	//SDL init
-	if( SDL_Init(SDL_INIT_VIDEO) ){
-		printf("couldn't init SDL - %s.\n", SDL_GetError());
-		return -1;
-	}
-	//create window	
-	window = SDL_CreateWindow("simple player demo",
-							SDL_WINDOWPOS_UNDEFINED,
-							SDL_WINDOWPOS_UNDEFINED,
-							screen_w,screen_h,
-							SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE);
-	if( !window ){
-		printf("could not create window - %s.\n", SDL_GetError());
-		return -1;
-	}
-
-	//create render
-	renderer = SDL_CreateRenderer(window, -1, 0);
-
-	//create texture
-	pixformat= SDL_PIXELFORMAT_IYUV; //IYUV: Y + U + V  (3 planes)    YV12: Y + V + U  (3 planes)
-	texture = SDL_CreateTexture(renderer,pixformat,SDL_TEXTUREACCESS_STREAMING,pixel_w,pixel_h);
-
-	//open a raw video pixel data file
-	fp = fopen(pfilePath,"rb+");
+	
+	pHandle->winWidth = 800;
+	pHandle->winHeight = 480;
+	pHandle->pixelWidth = 640;
+	pHandle->pixelHeight = 360;
+	pHandle->bufSize = pHandle->pixelWidth * pHandle->pixelHeight * 12 / 8;
+	pHandle->frameBuf = (unsigned char *)malloc(pHandle->bufSize);
+	pHandle->pixformat = SDL_PIXELFORMAT_IYUV; //IYUV: Y + U + V  (3 planes)    YV12: Y + V + U  (3 planes)
+	fp = fopen(pHandle->yuvFilePath,"rb+");//open a raw video pixel data file
 	if( NULL == fp ){
 		printf("open yuv file failed.\n");
 		return -1;
 	}
 
-	//create a sdl refresh thread
-	refreshThread = SDL_CreateThread(refresh_video,NULL,NULL);
 
-	//while(1) wait refresh event
-	while(1){
-		SDL_WaitEvent(&event);
+	g_ThreadExitFlag=0;
+	while (!g_ThreadExitFlag) {
+		
+		SDL_LockMutex(g_pSdlMutex);
 
-		if(event.type == REFRESH_EVENT){
-			if (fread(buffer, 1, pixel_w*pixel_h*bpp/8, fp) != pixel_w*pixel_h*bpp/8){
-				// Loop
-				fseek(fp, 0, SEEK_SET);
-				fread(buffer, 1, pixel_w*pixel_h*bpp/8, fp);
-			}
-
-			SDL_UpdateTexture(texture, NULL, buffer, pixel_w);  
-
-			//FIX: If window is resize
-			rect.x = 0;  
-			rect.y = 0;  
-			rect.w = screen_w;  
-			rect.h = screen_h;  
-			
-			SDL_RenderClear(renderer);   
-			SDL_RenderCopy(renderer, texture, NULL, &rect);  
-			SDL_RenderPresent(renderer);
-		}else if(event.type == SDL_WINDOWEVENT){
-			SDL_GetWindowSize(window,&screen_w,&screen_h);
-		}else if(event.type == SDL_QUIT){
-			thread_exit = 1;
-			printf("sdl quit event occured!\n");
-		}else if( event.type == BREAK_EVENT){
-			printf("sdl break event occured!\n");
-			break;
+		if (fread(pHandle->frameBuf, 1, pHandle->bufSize, fp) != pHandle->bufSize){
+			fseek(fp, 0, SEEK_SET);
+			fread(pHandle->frameBuf, 1, pHandle->bufSize, fp);
 		}
+		//printf("%s,%d \n",__func__, __LINE__);	
+		pHandle->bufDataRdyFlag = 1;
+		SDL_CondSignal(g_pSdlCond);
+		SDL_UnlockMutex(g_pSdlMutex);
+
+		eventPost.type = REFRESH_EVENT;
+		SDL_PushEvent(&eventPost);
+		SDL_Delay(40);
+	
+	}
+	g_ThreadExitFlag=0;
+	eventPost.type = BREAK_EVENT;
+	SDL_PushEvent(&eventPost);
+	SDL_Delay(30);
+	
+	// free frame buffer
+	free(pHandle->frameBuf);
+
+	return 0;
+}
+int main(int argc, char *argv[])
+{
+	SDL_Thread *pDecSdlThr,*pGuiSdlThr;
+	int iStat = 0;
+
+	//parameters check and using explanation
+	if( argc <= 1){
+		printf("sPlayerDemo using error : too few parameters!!!\n");
+		printf("-----------------------------------------------\n");
+		printf("synopsis : \n");
+		printf("	sPlayerDemo FILE\n");
+		//printf("descriptions : \n ");
+		goto error1;
+	}else{
+		g_spHandle.yuvFilePath = argv[1]; // copy file path
+		g_spHandle.bufDataRdyFlag = 0;
 	}
 
-	//quit SDL
-	SDL_Quit();
-	printf("sPlayerDemo exit!\n");
+	g_pSdlMutex = SDL_CreateMutex();
+	g_pSdlCond = SDL_CreateCond();
+	pDecSdlThr = SDL_CreateThread(sPlayerDecode_threadfn, "decode", NULL);
+	if(NULL == pDecSdlThr){
+		printf("mian: create decode thread failed!\n");
+		goto error1;
+	}
+	pGuiSdlThr = SDL_CreateThread(sPlayerGUI_threadfn, "gui", NULL);
+	if(NULL == pGuiSdlThr){
+		printf("main: create GUI thread failed!\n");
+		goto error2;
+	}
+
+	SDL_WaitThread(pGuiSdlThr,&iStat);
+	SDL_WaitThread(pDecSdlThr,&iStat);
+	SDL_DestroyMutex(g_pSdlMutex);
+	SDL_DestroyCond(g_pSdlCond);
 	return 0;
+
+
+error2:
+	SDL_WaitThread(pDecSdlThr,&iStat);
+error1:
+	return -1;
 }
