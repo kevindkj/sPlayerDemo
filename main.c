@@ -21,10 +21,17 @@
 #include<libavformat/avformat.h>
 #include<SDL2/SDL.h>
 //#include<SDL2/SDL_mutex.h>
-#include<pthread.h>
+//#include<pthread.h>
 
 #define REFRESH_EVENT  (SDL_USEREVENT + 1)
 #define BREAK_EVENT  (SDL_USEREVENT + 2)
+#define SPLAYER_DEMO_DEBUG
+#ifdef SPLAYER_DEMO_DEBUG
+//#define SPLAYER_PRINT(format, ...) printf(format, ##__VA_ARGS__)
+#define SPLAYER_PRINT(format, args...) printf(format, ##args)
+#else
+#define SPLAYER_PRINT(format, ...)
+#endif
 
 typedef struct sPlayerHandle{
 	SDL_Window *window;
@@ -36,7 +43,7 @@ typedef struct sPlayerHandle{
 	int pixelWidth;
 	int pixelHeight;
 	unsigned char *frameBuf;
-	int bufSize;
+	unsigned int bufSize;
 	int bufDataRdyFlag;
 	char *yuvFilePath;
 }sPlayerHandle_t;
@@ -80,17 +87,15 @@ int sPlayerGUI_threadfn(void *args)
 
 
 	while(1){
-		// wait refresh event
-		SDL_WaitEvent(&event);
+		SDL_WaitEvent(&event);// wait events
 		if(event.type == REFRESH_EVENT){
 
 			SDL_LockMutex(g_pSdlMutex);
-			while(0 == pHandle->bufDataRdyFlag){
-		printf("%s,%d \n",__func__, __LINE__);	
+			while((0 == pHandle->bufDataRdyFlag) && (g_ThreadExitFlag == 0)){
+				SPLAYER_PRINT("%s,%d \n",__func__, __LINE__);	
 				SDL_CondWait(g_pSdlCond,g_pSdlMutex);
 			}
 			pHandle->bufDataRdyFlag = 0;	
-		//printf("%s,%d \n",__func__, __LINE__);	
 			SDL_UpdateTexture(pHandle->texture, NULL, pHandle->frameBuf, pHandle->pixelWidth);  
 			SDL_UnlockMutex(g_pSdlMutex);
 
@@ -124,6 +129,7 @@ int sPlayerDecode_threadfn(void *args)
 	FILE *fp = NULL;
 	SDL_Event eventPost;
 	sPlayerHandle_t *pHandle = &g_spHandle;
+	size_t tFileRdSize = 0;
 
 	// regitser av api
 	// open input av file with avformat lib
@@ -158,25 +164,24 @@ int sPlayerDecode_threadfn(void *args)
 	while (!g_ThreadExitFlag) {
 		
 		SDL_LockMutex(g_pSdlMutex);
-
-		if (fread(pHandle->frameBuf, 1, pHandle->bufSize, fp) != pHandle->bufSize){
+		tFileRdSize = fread(pHandle->frameBuf, 1, pHandle->bufSize, fp);
+		if ( tFileRdSize != pHandle->bufSize){
 			fseek(fp, 0, SEEK_SET);
-			fread(pHandle->frameBuf, 1, pHandle->bufSize, fp);
+			tFileRdSize = fread(pHandle->frameBuf, 1, pHandle->bufSize, fp);
 		}
-		//printf("%s,%d \n",__func__, __LINE__);	
+		SPLAYER_PRINT("%s,%d \n",__func__, __LINE__);	
 		pHandle->bufDataRdyFlag = 1;
 		SDL_CondSignal(g_pSdlCond);
 		SDL_UnlockMutex(g_pSdlMutex);
 
 		eventPost.type = REFRESH_EVENT;
 		SDL_PushEvent(&eventPost);
-		SDL_Delay(40);
+		SDL_Delay(30);
 	
 	}
 	g_ThreadExitFlag=0;
 	eventPost.type = BREAK_EVENT;
 	SDL_PushEvent(&eventPost);
-	SDL_Delay(30);
 	
 	// free frame buffer
 	free(pHandle->frameBuf);
