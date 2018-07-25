@@ -19,12 +19,22 @@
 #include<libavutil/avutil.h>
 #include<libavcodec/avcodec.h>
 #include<libavformat/avformat.h>
+#include<libswscale/swscale.h>
 #include<SDL2/SDL.h>
 //#include<SDL2/SDL_mutex.h>
 //#include<pthread.h>
 
 #define REFRESH_EVENT  (SDL_USEREVENT + 1)
 #define BREAK_EVENT  (SDL_USEREVENT + 2)
+
+#define FILE_IS_INPUT 0
+#define FILE_IS_OUTPUT 1
+
+#define SPLAYER_OUTPUT_YUV420_FILE 0
+#ifdef SPLAYER_OUTPUT_YUV420_FILE 
+#define YUV_FILENAME "output.yuv"
+#endif
+
 #define SPLAYER_DEMO_DEBUG
 #ifdef SPLAYER_DEMO_DEBUG
 //#define SPLAYER_PRINT(format, ...) printf(format, ##__VA_ARGS__)
@@ -45,7 +55,7 @@ typedef struct sPlayerHandle{
 	unsigned char *frameBuf;
 	unsigned int bufSize;
 	int bufDataRdyFlag;
-	char *yuvFilePath;
+	char *filePath;
 }sPlayerHandle_t;
 
 int g_ThreadExitFlag = 0;
@@ -59,6 +69,10 @@ int sPlayerGUI_threadfn(void *args)
 	SDL_Event event;
 	SDL_Rect rect;
 	
+	pHandle->winWidth = pHandle->pixelWidth + 200;
+	pHandle->winHeight = pHandle->winWidth*9/16;
+	pHandle->pixformat = SDL_PIXELFORMAT_IYUV; //IYUV: Y + U + V  (3 planes)    YV12: Y + V + U  (3 planes)
+
 	//SDL init
 	if( SDL_Init(SDL_INIT_VIDEO) ){
 		printf("couldn't init SDL - %s.\n", SDL_GetError());
@@ -81,7 +95,8 @@ int sPlayerGUI_threadfn(void *args)
 
 	//create texture
 	pHandle->texture = SDL_CreateTexture(pHandle->renderer, \
-										 pHandle->pixformat,SDL_TEXTUREACCESS_STREAMING, \
+										 pHandle->pixformat, \
+										 SDL_TEXTUREACCESS_STREAMING, \
 										 pHandle->pixelWidth, \
 										 pHandle->pixelHeight);
 
@@ -129,55 +144,136 @@ int sPlayerDecode_threadfn(void *args)
 	FILE *fp = NULL;
 	SDL_Event eventPost;
 	sPlayerHandle_t *pHandle = &g_spHandle;
-	size_t tFileRdSize = 0;
+	//size_t tFileRdSize = 0;
+
+	int i = 0;
+	AVFormatContext *pFmtContext = NULL;
+	int iRet = 0;
+	char cErrBuf[512] = {0};
+	int iVideoStreamNum = -1;
+	AVCodecContext *pCodecContext = NULL;
+	AVCodec *pCodec = NULL;
+	AVFrame *pFrame=NULL,*pFrameYUV=NULL;
+	AVPacket *pPacket = NULL;
+	struct SwsContext *pSwsConvertCtx;
 
 	// regitser av api
+	av_register_all();
 	// open input av file with avformat lib
+	pFmtContext = avformat_alloc_context();
+	iRet = avformat_open_input(&pFmtContext, pHandle->filePath, NULL, NULL);
+	if(0 != iRet){
+		av_strerror(iRet,cErrBuf,sizeof(cErrBuf));
+		printf("avformat open input file failed, errorcode=%d(%s).\n",iRet,cErrBuf);
+		return -1;
+	}
 	// find stream info
+	iRet = avformat_find_stream_info(pFmtContext,NULL);
+	if(iRet < 0){
+		printf("avformat_find_stream_info failed.\n");
+		return -1;
+	}
+	for(i=0; i<pFmtContext->nb_streams; i++){
+		if(pFmtContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO){
+			iVideoStreamNum = i;
+			break;
+		}
+	}
+	if(i == pFmtContext->nb_streams){
+		printf("can't find video stream in the file.\n");
+		return -1;
+	}
+	SPLAYER_PRINT("find a video stream=%d.################\n", iVideoStreamNum);
 	// find decode
+	pCodecContext = pFmtContext->streams[iVideoStreamNum]->codec;
+	pHandle->pixelWidth = pCodecContext->width; // pass codec info to displayer's handle
+	pHandle->pixelHeight = pCodecContext->height;
+	//pHandle->pixformat = pCodecContext->pix_fmt;
+	SPLAYER_PRINT("display pixel content width=%d,height=%d.\n", \
+				pHandle->pixelWidth,pHandle->pixelHeight);
+	pCodec = avcodec_find_decoder(pCodecContext->codec_id);
+	if(NULL == pCodec){
+		printf("avcodec find decoder failed.\n");
+		return -1;
+	}
 	// open codec
-	// cyclic reading frame
-		// if(get packet - yes)
-			// AVPacket type ?
-				// Video packet
-			
-				// Audio packet
-		// else if(get packet - no) quit
+	iRet = avcodec_open2(pCodecContext,pCodec,NULL);
+	if(iRet < 0){
+		printf("avcodec_open2 failed.\n");
+		return -1;
+	}
 
-	
-	
-	pHandle->winWidth = 800;
-	pHandle->winHeight = 480;
-	pHandle->pixelWidth = 640;
-	pHandle->pixelHeight = 360;
-	pHandle->bufSize = pHandle->pixelWidth * pHandle->pixelHeight * 12 / 8;
-	pHandle->frameBuf = (unsigned char *)malloc(pHandle->bufSize);
-	pHandle->pixformat = SDL_PIXELFORMAT_IYUV; //IYUV: Y + U + V  (3 planes)    YV12: Y + V + U  (3 planes)
-	fp = fopen(pHandle->yuvFilePath,"rb+");//open a raw video pixel data file
+	// print stream Info about input video file
+	printf("------------ Video File Information -------------\n");
+	av_dump_format(pFmtContext, iVideoStreamNum, pHandle->filePath, FILE_IS_INPUT);
+	printf("-------------------------------------------------\n");
+
+	pFrame = av_frame_alloc();
+	pFrameYUV = av_frame_alloc();
+	pHandle->bufSize = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, \
+				pCodecContext->width, \
+				pCodecContext->height,1);
+	pHandle->frameBuf = (unsigned char *)av_malloc(pHandle->bufSize);
+	av_image_fill_arrays(pFrameYUV->data, \
+				pFrameYUV->linesize, \
+				pHandle->frameBuf, \
+				AV_PIX_FMT_YUV420P, \
+				pCodecContext->width, \
+				pCodecContext->height,1);
+	pPacket = (AVPacket *)av_malloc(sizeof(AVPacket));
+	pSwsConvertCtx = sws_getContext(pCodecContext->width, \
+				pCodecContext->height, \
+				pCodecContext->pix_fmt, \
+				pCodecContext->width, \
+				pCodecContext->height, \
+				AV_PIX_FMT_YUV420P, \
+				SWS_BICUBIC, \
+				NULL, NULL, NULL); 
+
+#ifdef SPLAYER_OUTPUT_YUV420_FILE  
+    fp = fopen(YUV_FILENAME ,"wb+");  
 	if( NULL == fp ){
 		printf("open yuv file failed.\n");
 		return -1;
 	}
+#endif 
 
-
+	// cyclic reading frame, if(get packet - yes), else if(get packet - no) quit
 	g_ThreadExitFlag=0;
-	while (!g_ThreadExitFlag) {
-		
-		SDL_LockMutex(g_pSdlMutex);
-		tFileRdSize = fread(pHandle->frameBuf, 1, pHandle->bufSize, fp);
-		if ( tFileRdSize != pHandle->bufSize){
-			fseek(fp, 0, SEEK_SET);
-			tFileRdSize = fread(pHandle->frameBuf, 1, pHandle->bufSize, fp);
-		}
-		SPLAYER_PRINT("%s,%d \n",__func__, __LINE__);	
-		pHandle->bufDataRdyFlag = 1;
-		SDL_CondSignal(g_pSdlCond);
-		SDL_UnlockMutex(g_pSdlMutex);
+	while ((!g_ThreadExitFlag) && (av_read_frame(pFmtContext,pPacket) >= 0)) {
+		int iGotPic = 0;
 
-		eventPost.type = REFRESH_EVENT;
-		SDL_PushEvent(&eventPost);
-		SDL_Delay(30);
-	
+		// AVPacket type ?
+		SPLAYER_PRINT("av_read_frame : stream index = %d.\n",pPacket->stream_index); 
+		if(iVideoStreamNum == pPacket->stream_index){
+			// Video packet
+			iRet = avcodec_decode_video2(pCodecContext, pFrame, &iGotPic, pPacket);
+			if(iRet < 0){
+				printf("avcodec_decode_video2 failed.\n");
+			}
+			if(iGotPic){
+				SDL_LockMutex(g_pSdlMutex);
+				SPLAYER_PRINT("### : %s,%d \n",__func__, __LINE__);	
+
+				// pic raw pixel data frame format exchange
+				sws_scale(pSwsConvertCtx,pFrame->data, \
+							pFrame->linesize,0, \
+							pCodecContext->height, \
+							pFrameYUV->data, \
+							pFrameYUV->linesize);
+				SPLAYER_PRINT("sws_scale finished. %s,%d \n",__func__, __LINE__);	
+				pHandle->bufDataRdyFlag = 1;
+				SDL_CondSignal(g_pSdlCond);
+				SDL_UnlockMutex(g_pSdlMutex);
+
+				eventPost.type = REFRESH_EVENT;
+				SDL_PushEvent(&eventPost);
+				SDL_Delay(30);
+			}
+		}else{
+			// Audio packet, to be continued...
+			SPLAYER_PRINT("get audio packet.\n");
+		}
 	}
 	g_ThreadExitFlag=0;
 	eventPost.type = BREAK_EVENT;
@@ -186,6 +282,10 @@ int sPlayerDecode_threadfn(void *args)
 	// free frame buffer
 	free(pHandle->frameBuf);
 
+	av_frame_free(pFrame);
+	av_frame_free(pFrameYUV);
+	avcodec_close(pCodecContext);
+	avformat_close_input(&pFmtContext);
 	return 0;
 }
 int main(int argc, char *argv[])
@@ -202,7 +302,7 @@ int main(int argc, char *argv[])
 		//printf("descriptions : \n ");
 		goto error1;
 	}else{
-		g_spHandle.yuvFilePath = argv[1]; // copy file path
+		g_spHandle.filePath = argv[1]; // copy file path
 		g_spHandle.bufDataRdyFlag = 0;
 	}
 
@@ -213,6 +313,7 @@ int main(int argc, char *argv[])
 		printf("mian: create decode thread failed!\n");
 		goto error1;
 	}
+	SDL_Delay(30);
 	pGuiSdlThr = SDL_CreateThread(sPlayerGUI_threadfn, "gui", NULL);
 	if(NULL == pGuiSdlThr){
 		printf("main: create GUI thread failed!\n");

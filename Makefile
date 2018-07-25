@@ -27,7 +27,8 @@ LIB_INC = -I$(FFMPEG_DIR)/include
 C_INC = -I.
 INCLUDES = $(C_INC) $(LIB_INC)
 LIBS = -L$(FFMPEG_DIR)/lib \
-	   -lavformat -lavcodec -lavutil -lswresample -lm -lpthread -lz -lSDL2
+	   -lavformat -lavcodec -lavutil -lswresample -lswscale\
+	   -lm -lpthread -lz -lSDL2
 
 OUTPUT = $(APP_TOPDIR)/bin
 OBJS = main.o
