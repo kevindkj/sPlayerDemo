@@ -20,6 +20,7 @@
 #include<libavcodec/avcodec.h>
 #include<libavformat/avformat.h>
 #include<libswscale/swscale.h>
+#include<libavutil/imgutils.h>
 #include<SDL2/SDL.h>
 //#include<SDL2/SDL_mutex.h>
 //#include<pthread.h>
@@ -146,7 +147,7 @@ int sPlayerDecode_threadfn(void *args)
 	sPlayerHandle_t *pHandle = &g_spHandle;
 	//size_t tFileRdSize = 0;
 
-	int i = 0;
+	unsigned int i = 0;
 	AVFormatContext *pFmtContext = NULL;
 	int iRet = 0;
 	char cErrBuf[512] = {0};
@@ -256,7 +257,8 @@ int sPlayerDecode_threadfn(void *args)
 				SPLAYER_PRINT("### : %s,%d \n",__func__, __LINE__);	
 
 				// pic raw pixel data frame format exchange
-				sws_scale(pSwsConvertCtx,pFrame->data, \
+				sws_scale(pSwsConvertCtx, \
+							(const uint8_t * const*)pFrame->data, \
 							pFrame->linesize,0, \
 							pCodecContext->height, \
 							pFrameYUV->data, \
@@ -282,8 +284,8 @@ int sPlayerDecode_threadfn(void *args)
 	// free frame buffer
 	free(pHandle->frameBuf);
 
-	av_frame_free(pFrame);
-	av_frame_free(pFrameYUV);
+	av_frame_free(&pFrame);
+	av_frame_free(&pFrameYUV);
 	avcodec_close(pCodecContext);
 	avformat_close_input(&pFmtContext);
 	return 0;
